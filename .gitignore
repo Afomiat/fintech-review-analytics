@@ -1,0 +1,25 @@
+# Data files — never commit raw or processed data
+data/
+*.csv
+*.db
+*.json
+
+# Virtual environment — everyone creates their own
+venv/
+
+# Python auto-generated files — not needed in version control
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment variables — NEVER commit secrets
+.env
