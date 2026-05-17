@@ -13,7 +13,9 @@ Built as part of a consulting engagement at **Omega Consultancy**, advising Ethi
 - [Project Structure](#project-structure)
 - [Setup & Installation](#setup--installation)
 - [Task 1: Data Collection & Preprocessing](#task-1-data-collection--preprocessing)
+- [Task 2: Sentiment & Thematic Analysis](#task-2-sentiment--thematic-analysis)
 - [Data Quality Report](#data-quality-report)
+- [Key Findings](#key-findings)
 - [Limitations](#limitations)
 - [CI/CD Pipeline](#cicd-pipeline)
 - [Contributing](#contributing)
@@ -49,32 +51,39 @@ fintech-review-analytics/
 │
 ├── .github/
 │   └── workflows/
-│       └── unittests.yml        # CI/CD pipeline — runs on every push to main
+│       └── unittests.yml              # CI/CD pipeline — runs on every push to main
 │
 ├── data/
-│   └── raw/                     # Local data files — never committed to GitHub
-│       ├── reviews_raw.csv      # Output of scrape_reviews.py
-│       └── reviews_clean.csv    # Output of preprocess_reviews.py
+│   ├── raw/                           # Local data files — never committed to GitHub
+│   │   ├── reviews_raw.csv            # Output of scrape_reviews.py
+│   │   └── reviews_clean.csv          # Output of preprocess_reviews.py
+│   └── processed/                     # NLP output — never committed to GitHub
+│       ├── reviews_with_sentiment.csv # Output of sentiment_analysis.py
+│       └── reviews_analyzed.csv       # Output of thematic_analysis.py
 │
 ├── notebooks/
 │   ├── __init__.py
-│   └── explore_scraper.py       # Exploration script to inspect raw scraper output
+│   ├── explore_scraper.py             # Inspects raw scraper output
+│   ├── explore_sentiment.py           # Tests VADER on sample reviews
+│   └── explore_tfidf.py               # Explores TF-IDF keywords per bank
 │
 ├── scripts/
 │   ├── __init__.py
-│   ├── scrape_reviews.py        # Scrapes reviews from Google Play Store
-│   ├── preprocess_reviews.py    # Cleans, deduplicates, and normalizes raw data
-│   └── validate_data.py         # Validates cleaned data against project KPIs
+│   ├── scrape_reviews.py              # Scrapes reviews from Google Play Store
+│   ├── preprocess_reviews.py          # Cleans, deduplicates, normalizes raw data
+│   ├── validate_data.py               # Validates cleaned data against KPIs
+│   ├── sentiment_analysis.py          # DistilBERT + VADER sentiment pipeline
+│   └── thematic_analysis.py           # TF-IDF keyword extraction + theme assignment
 │
 ├── src/
-│   └── __init__.py              # Reusable modules (populated in later tasks)
+│   └── __init__.py                    # Reusable modules (populated in later tasks)
 │
 ├── tests/
-│   └── __init__.py              # Unit tests (populated in later tasks)
+│   └── __init__.py                    # Unit tests (populated in later tasks)
 │
-├── .gitignore                   # Excludes data files, venv, and cache
-├── requirements.txt             # Python dependencies
-└── README.md                    # This file
+├── .gitignore                         # Excludes data files, venv, and cache
+├── requirements.txt                   # Python dependencies
+└── README.md                          # This file
 ```
 
 ---
@@ -115,6 +124,8 @@ You should see `(venv)` appear at the start of your terminal prompt.
 pip install -r requirements.txt
 ```
 
+> **Note:** `torch` (~123MB) and the DistilBERT model (~268MB) will be downloaded on first run. Subsequent runs use the local cache.
+
 ---
 
 ## Task 1: Data Collection & Preprocessing
@@ -132,8 +143,6 @@ validate_data.py        → ALL CHECKS PASSED ✓
 ```
 
 ### Running the Pipeline
-
-Run each script in order from the project root:
 
 ```bash
 # Step 1: Scrape reviews from Google Play Store
@@ -185,9 +194,89 @@ python scripts/validate_data.py
 
 ---
 
-## Data Quality Report
+## Task 2: Sentiment & Thematic Analysis
 
-Results after running the full pipeline:
+### Pipeline Overview
+
+```
+data/raw/reviews_clean.csv
+      ↓
+sentiment_analysis.py   → data/processed/reviews_with_sentiment.csv
+      ↓
+thematic_analysis.py    → data/processed/reviews_analyzed.csv
+```
+
+### Running the Pipeline
+
+```bash
+# Step 1: Run sentiment analysis (DistilBERT + VADER)
+python scripts/sentiment_analysis.py
+
+# Step 2: Extract keywords and assign themes
+python scripts/thematic_analysis.py
+```
+
+### What Each Script Does
+
+**`sentiment_analysis.py`**
+- Loads 1,450 clean reviews
+- Runs DistilBERT (`distilbert-base-uncased-finetuned-sst-2-english`) as primary tool
+- Runs VADER as secondary tool for comparison and validation
+- Assigns each review: `sentiment_label` (POSITIVE/NEGATIVE/NEUTRAL) and `sentiment_score`
+- Reports sentiment breakdown per bank and per star rating
+- Saves output to `data/processed/reviews_with_sentiment.csv`
+
+**`thematic_analysis.py`**
+- Loads sentiment-labeled reviews
+- Extracts top TF-IDF keywords per bank (single words and two-word phrases)
+- Assigns each review to one of 6 themes based on keyword matching
+- Reports theme distribution and sentiment breakdown within each theme
+- Saves final output to `data/processed/reviews_analyzed.csv`
+
+### Sentiment Tool Selection Rationale
+
+Two tools were used and compared:
+
+| Tool | Type | Strengths | Weaknesses |
+|------|------|-----------|------------|
+| DistilBERT | Transformer (neural network) | Understands context and negation, handles informal text, state-of-the-art accuracy | Requires torch (~123MB), slower to run |
+| VADER | Lexicon (rule-based) | Fast, no heavy dependencies, interpretable scores | Misses context, struggles with broken grammar and emojis |
+
+**DistilBERT was selected as primary** because it correctly handles cases VADER misses:
+
+| Review | DistilBERT | VADER |
+|--------|-----------|-------|
+| "It's not allowing me to transfer money" | NEGATIVE (99.7%) | NEUTRAL |
+| "IT'S NOT WORK ON HUAWEI DEVICES" | NEGATIVE (99.97%) | NEUTRAL |
+| "not bad but could be better" | NEGATIVE (context-aware) | NEUTRAL |
+
+Overall agreement between tools: **59.5%**. Disagreements consistently showed DistilBERT was correct — VADER over-assigns NEUTRAL on informal and grammatically broken text.
+
+### Theme Taxonomy
+
+Themes were defined by first running TF-IDF keyword exploration on the actual dataset, then grouping discovered keywords into business-relevant categories. Keywords reflect what users actually wrote.
+
+| Theme | Sample Keywords | Business Relevance |
+|-------|----------------|-------------------|
+| Transaction Performance | transfer, payment, slow, speed, loading, delay | Core banking function |
+| App Stability | crash, not working, fix, update, bug, error | Retention risk |
+| Account Access | login, OTP, password, fingerprint, locked | Security & access |
+| User Experience | easy, nice, interface, smooth, good, great | Product quality |
+| Customer Service | support, help, response, complaint, agent | Support quality |
+| Feature Requests | add, need, want, suggest, improve | Product roadmap |
+
+### Sentiment Coverage
+
+| Metric | Value |
+|--------|-------|
+| Reviews analyzed | 1,450 / 1,450 |
+| Coverage | 100% |
+| KPI requirement | 90% minimum |
+| Status | ✓ Passed |
+
+---
+
+## Data Quality Report
 
 | Metric | Value |
 |--------|-------|
@@ -210,23 +299,95 @@ Results after running the full pipeline:
 | ⭐⭐⭐⭐ 4 stars | 104 | 7% |
 | ⭐⭐⭐⭐⭐ 5 stars | 826 | 57% |
 
-> **Note:** The strong skew toward 1-star and 5-star ratings reflects a known bias in user-generated review data. Users are most likely to leave a review after an extremely positive or extremely negative experience. Middle ratings (2–4 stars) are underrepresented. This will be accounted for in the sentiment analysis in Task 2.
+> **Note:** The strong skew toward 1-star and 5-star ratings reflects negativity/positivity bias in user-generated review data. Users are most likely to leave a review after an extremely positive or negative experience. Middle ratings are underrepresented.
+
+---
+
+## Key Findings
+
+### Sentiment by Bank
+
+| Bank | Positive | Negative | Neutral | Avg Confidence |
+|------|----------|----------|---------|----------------|
+| Commercial Bank of Ethiopia | 57.0% | 41.4% | 1.5% | 0.968 |
+| Bank of Abyssinia | 43.8% | 55.6% | 0.6% | 0.960 |
+| Dashen Bank | 56.5% | 43.1% | 0.4% | 0.971 |
+
+> BOA has the highest negative sentiment (55.6%), consistent with its lowest Play Store rating (3.4★). Dashen and CBE are close, consistent with their similar ratings (4.1★ and 4.2★).
+
+### Sentiment Validates Star Ratings
+
+| Stars | Positive % |
+|-------|------------|
+| 1★ | 9.1% |
+| 2★ | 13.6% |
+| 3★ | 29.5% |
+| 4★ | 45.2% |
+| 5★ | 77.8% |
+
+Positive percentage increases consistently with star rating — confirms the DistilBERT model is correctly classifying sentiment.
+
+### Pain Points by Bank
+
+| Theme | CBE Negative | BOA Negative | Dashen Negative |
+|-------|-------------|-------------|-----------------|
+| App Stability | 75% | 91% | 90% |
+| Transaction Performance | 60% | 76% | 61% |
+| Account Access | 73% | 70% | 64% |
+| Feature Requests | 56% | 92% | 58% |
+
+App Stability is the single biggest complaint across all three banks. BOA's App Stability score (91% negative) indicates a critical reliability issue.
+
+### Strengths by Bank
+
+| Theme | CBE Positive | BOA Positive | Dashen Positive |
+|-------|-------------|-------------|-----------------|
+| User Experience | 94% | 91% | 88% |
+| Customer Service | 56% | 17% | 40% |
+
+User Experience is the consistent strength across all banks — users appreciate the interface design even when functionality fails. CBE leads in Customer Service satisfaction.
+
+### Bank-Specific Recommendations
+
+**Commercial Bank of Ethiopia**
+- Prioritize stability fixes — 75% of App Stability reviews are negative
+- Investigate transfer failure patterns — 60% of Transaction Performance reviews are negative
+- Leverage strong customer service reputation (94% positive) as a differentiator
+
+**Bank of Abyssinia**
+- App Stability is a crisis — 91% negative, highest of all three banks
+- Feature gap is significant — 92% of Feature Request reviews are negative, users feel the app is incomplete
+- Customer Service needs improvement — only 17% positive, lowest of all three banks
+
+**Dashen Bank**
+- App Stability (90% negative) needs urgent attention despite strong UX scores
+- Account Access issues (64% negative) suggest login/OTP reliability problems
+- Strong User Experience foundation (88% positive) — build on this with stability improvements
 
 ---
 
 ## Limitations
 
 ### 1. Duplicate Reviews from Scraper
-The `google-play-scraper` library returns duplicate reviews when requesting large counts — it loops back to previously seen reviews to fill the requested number. To compensate, we request 600 reviews per bank and rely on deduplication in preprocessing to produce a clean dataset above the 400-per-bank minimum.
+The `google-play-scraper` library returns duplicate reviews when requesting large counts. Requested 600 per bank; received ~480 clean after deduplication.
 
 ### 2. English Reviews Only
-The scraper is configured with `lang='en'`. Reviews written in Amharic or other languages are excluded from this dataset. Given that Ethiopia is a multilingual country, this represents a meaningful gap in coverage that could bias findings toward English-speaking users.
+The scraper is configured with `lang='en'`. Reviews in Amharic or other languages are excluded, biasing findings toward English-speaking users who may not represent the full Ethiopian user base.
 
 ### 3. Rate Limiting
-Sending too many requests to Google Play in a short time can trigger rate limiting, which silently reduces the number of reviews returned. A 2-second delay between bank requests is included in the scraper to mitigate this. On repeated runs, counts may vary slightly.
+Rapid requests can trigger Google rate limiting. A 2-second delay between banks mitigates this. Counts may vary slightly on repeated runs.
 
-### 4. Review Availability
-The number of available English-language reviews on Google Play is finite. Some banks may have fewer reviews than others simply due to their user base size or app age — not necessarily due to product quality differences.
+### 4. Theme Assignment by Keyword Matching
+Keyword matching cannot understand context. A review containing "transfer" is assigned Transaction Performance even if used positively. Sentiment within each theme partially corrects for this.
+
+### 5. Short Reviews Without Specific Topics
+Approximately 33-39% of reviews across all banks are very short ("nice", "good", "worst") with no specific topic. These fall into the General category and cannot be meaningfully themed without more context.
+
+### 6. Rating vs Text Contradictions
+Some reviews have star ratings that contradict the review text (e.g., 4 stars with entirely negative text). DistilBERT correctly classifies the text sentiment — the star rating is treated as a separate signal.
+
+### 7. DistilBERT Binary Classification
+DistilBERT only outputs POSITIVE or NEGATIVE. NEUTRAL is assigned when confidence falls below 0.6. Some genuinely neutral reviews may be forced into a binary category at high confidence.
 
 ---
 
@@ -238,8 +399,6 @@ Every push to `main` and every Pull Request targeting `main` triggers an automat
 2. Installs Python 3.10
 3. Runs `pip install -r requirements.txt`
 4. Verifies key packages import correctly
-
-This ensures the project is reproducible on any machine, not just the developer's local environment.
 
 Pipeline configuration: `.github/workflows/unittests.yml`
 
