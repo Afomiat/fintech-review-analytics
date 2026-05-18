@@ -14,6 +14,7 @@ Built as part of a consulting engagement at **Omega Consultancy**, advising Ethi
 - [Setup & Installation](#setup--installation)
 - [Task 1: Data Collection & Preprocessing](#task-1-data-collection--preprocessing)
 - [Task 2: Sentiment & Thematic Analysis](#task-2-sentiment--thematic-analysis)
+- [Task 3: Database Engineering](#task-3-database-engineering)
 - [Data Quality Report](#data-quality-report)
 - [Key Findings](#key-findings)
 - [Limitations](#limitations)
@@ -73,7 +74,9 @@ fintech-review-analytics/
 │   ├── preprocess_reviews.py          # Cleans, deduplicates, normalizes raw data
 │   ├── validate_data.py               # Validates cleaned data against KPIs
 │   ├── sentiment_analysis.py          # DistilBERT + VADER sentiment pipeline
-│   └── thematic_analysis.py           # TF-IDF keyword extraction + theme assignment
+│   ├── thematic_analysis.py           # TF-IDF keyword extraction + theme assignment
+│   ├── schema.sql                     # PostgreSQL database schema
+│   └── insert_data.py                 # Inserts reviewed data into PostgreSQL
 │
 ├── src/
 │   └── __init__.py                    # Reusable modules (populated in later tasks)
@@ -273,6 +276,97 @@ Themes were defined by first running TF-IDF keyword exploration on the actual da
 | Coverage | 100% |
 | KPI requirement | 90% minimum |
 | Status | ✓ Passed |
+
+---
+
+## Task 3: Database Engineering
+
+### Pipeline Overview
+data/processed/reviews_analyzed.csv
+↓
+insert_data.py   → PostgreSQL bank_reviews database
+↓
+verification queries → ALL CHECKS PASSED ✓
+
+### Database Setup
+
+**Prerequisites:**
+- PostgreSQL 17+ installed and running locally
+- `bank_reviews` database created
+
+```bash
+# Step 1: Create the database
+psql -U postgres -c "CREATE DATABASE bank_reviews;"
+
+# Step 2: Create tables from schema file
+psql -U postgres -d bank_reviews -f scripts/schema.sql
+
+# Step 3: Insert all review data
+python scripts/insert_data.py
+```
+
+### Schema Design
+
+Two tables with a one-to-many relationship.
+One bank has many reviews. Each review belongs to one bank.
+
+**banks table**
+
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| bank_id | SERIAL | PRIMARY KEY | Auto-generated unique ID |
+| bank_name | VARCHAR(100) | NOT NULL | Full bank name |
+| app_name | VARCHAR(100) | NOT NULL | Google Play app ID |
+
+**reviews table**
+
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| review_id | INTEGER | PRIMARY KEY | From CSV review_id |
+| bank_id | INTEGER | FOREIGN KEY → banks | Links review to bank |
+| review_text | TEXT | | Raw review content |
+| rating | INTEGER | CHECK 1–5 | Star rating |
+| review_date | DATE | | Date of review |
+| sentiment_label | VARCHAR(20) | | POSITIVE/NEGATIVE/NEUTRAL |
+| sentiment_score | FLOAT | | DistilBERT confidence |
+| vader_label | VARCHAR(20) | | VADER sentiment label |
+| vader_score | FLOAT | | VADER compound score |
+| identified_theme | VARCHAR(50) | | Business theme |
+| source | VARCHAR(50) | | Always 'Google Play' |
+
+### Verification Results
+
+All verification queries passed after insertion:
+
+| Query | Result |
+|-------|--------|
+| Total reviews inserted | 1,450 |
+| CBE reviews | 456 |
+| BOA reviews | 498 |
+| Dashen reviews | 496 |
+| Avg rating — CBE | 3.93★ |
+| Avg rating — BOA | 3.29★ |
+| Avg rating — Dashen | 3.78★ |
+| Null review_text | 0 |
+| Null rating | 0 |
+| Null sentiment_label | 0 |
+| Null identified_theme | 0 |
+| KPI (1,000+ entries) | ✓ Passed |
+
+### What Each Script Does
+
+**`schema.sql`**
+- Drops and recreates both tables cleanly
+- Defines all column types and constraints
+- Establishes the foreign key relationship between tables
+- Can be run to recreate the database on any machine
+
+**`insert_data.py`**
+- Connects to PostgreSQL using psycopg2
+- Clears existing data to allow clean reruns
+- Inserts 3 banks into the banks table
+- Inserts 1,450 reviews into the reviews table
+- Runs 4 verification queries and prints results
 
 ---
 
