@@ -182,9 +182,12 @@ def main():
     validate_themes(df)
 
     # Step 5: Select final output columns
+ # Rename review to review_text to match required schema
+    df = df.rename(columns={'review': 'review_text'})
+
     output_cols = [
         'review_id',
-        'review',
+        'review_text',
         'rating',
         'date',
         'bank',
